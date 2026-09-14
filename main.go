@@ -31,7 +31,8 @@ func setupFileLogging(logFile string, bStdout bool) {
 }
 
 type program struct {
-	server *http.Server
+	server     *http.Server
+	stop, done chan struct{}
 }
 
 func (p *program) init() {
@@ -53,13 +54,19 @@ func (p *program) run() {
 
 func (p *program) Start(_ service.Service) error {
 	log.Println("Service starting...")
+	p.stop, p.done = make(chan struct{}), make(chan struct{})
 	p.init()
 	go p.run()
+	go runRenameLoop(p.stop, p.done)
 	return nil
 }
 
 func (p *program) Stop(_ service.Service) error {
 	log.Println("Service stopping...")
+	if p.stop != nil {
+		close(p.stop)
+		<-p.done
+	}
 	if p.server == nil {
 		return nil
 	}
@@ -78,6 +85,9 @@ func main() {
 	}
 	logFile := strings.TrimSuffix(exePath, filepath.Ext(exePath)) + ".log"
 	setupFileLogging(logFile, service.Interactive())
+
+	renameLogFile := filepath.Join(filepath.Dir(exePath), "webCamDate.log")
+	initRenameLogging(renameLogFile, service.Interactive())
 
 	log.Print("base path: ", basePath)
 
