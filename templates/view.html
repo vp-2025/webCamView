@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Camera}} — {{.Time}}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; }
+        body {
+            font-family: Arial, sans-serif;
+            background: #0a0a12;
+            color: #eee;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            min-height: 100dvh;
+        }
+        #viewer {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-height: 0;
+        }
+        .viewer-stage {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+            position: relative;
+            cursor: pointer;
+        }
+        .viewer-stage img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+        .viewer-main {
+            display: flex;
+            flex: 1;
+            min-height: 0;
+        }
+        .nav-side {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 14px;
+            /* background: rgba(15, 26, 48, 0.7); */
+            width: 70px;
+            border-radius: 8px;
+            z-index: 10;
+        }
+        .nav-side.left {
+            left: 10px;
+        }
+        .nav-side.right {
+            right: 10px;
+        }
+        .nav-side button {
+            width: 100%;
+            background: #1a2744;
+            color: #ccc;
+            border: 1px solid #2a3a5c;
+            border-radius: 4px;
+            padding: 12px 0;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: background 0.15s;
+        }
+        .nav-side button:hover:not(:disabled) { background: #2a4070; color: #fff; }
+        .nav-side button:disabled { opacity: 0.35; color: #888; cursor: default; }
+        .counter-overlay {
+            background: rgba(15, 26, 48, 0.7);
+            padding: 4px;
+            border-radius: 4px;
+            color: #8899bb;
+            font-size: 0.9em;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+        .playback-area {
+            position: absolute;
+            top: 5px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 12px;
+            z-index: 10;
+        }
+        .playback-row {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 4px;
+        }
+        .time-overlay {
+            padding: 4px;
+            color: #ff2222;
+            font-size: 2em;
+            font-weight: bold;
+            line-height: 1.2;
+            pointer-events: none;
+            text-align: left;
+            white-space: nowrap;
+            text-shadow:
+                0 0 6px rgba(0, 0, 0, 0.95),
+                0 0 12px rgba(0, 0, 0, 0.85),
+                1px 1px 2px rgba(0, 0, 0, 0.9);
+        }
+        .playback-controls {
+            display: flex;
+            gap: 10px;
+            padding: 4px;
+            /* background: rgba(15, 26, 48, 0.7); */
+            border-radius: 8px;
+        }
+        .playback-controls button {
+            background: #1a2744;
+            color: #ccc;
+            border: 1px solid #2a3a5c;
+            border-radius: 4px;
+            padding: 8px 16px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: background 0.15s;
+        }
+        .playback-controls button:hover { background: #2a4070; color: #fff; }
+        .playback-controls button:disabled { opacity: 0.35; color: #888; cursor: default; }
+        .slot-graph {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 72px;
+            display: flex;
+            align-items: flex-end;
+            gap: 0;
+            padding: 4px 4px 6px;
+            background: rgba(15, 26, 48, 0.7);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            pointer-events: none;
+            z-index: 4;
+            transition: background 0.15s ease;
+        }
+        .slot-graph.playing {
+            background: transparent;
+        }
+        .slot-graph-time-marker {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            margin-left: -1px;
+            background: #22ee55;
+            box-shadow: 0 0 6px rgba(34, 238, 85, 0.85);
+            z-index: 6;
+            pointer-events: none;
+        }
+        .slot-graph .bar {
+            flex: 1;
+            min-width: 0;
+            background: rgba(80, 130, 200, 0.75);
+            transition: height 0.15s ease;
+        }
+        .slot-graph .bar.odd-hour {
+            background: rgba(55, 95, 155, 0.75);
+        }
+        .slot-graph .bar.current {
+            background: rgba(255, 60, 60, 0.95);
+            box-shadow: 0 0 4px rgba(255, 60, 60, 0.6);
+        }
+        .slot-graph .bar.empty {
+            background: rgba(80, 130, 200, 0.2);
+            min-height: 1px;
+        }
+        .slot-graph .bar.odd-hour.empty {
+            background: rgba(55, 95, 155, 0.2);
+        }
+        /* Fullscreen styles */
+        :fullscreen .viewer-main {
+            width: 100vw;
+            height: 100vh;
+        }
+    </style>
+</head>
+<body>
+    <div id="viewer" data-cam="{{.Camera}}" data-count="{{.Count}}" data-index="{{.Index}}" data-file="{{.FileName}}">
+        <div class="viewer-main">
+            <div class="viewer-stage" onclick="toggleFullScreen()">
+                <img src="{{.Path}}" alt="{{.Camera}}">
+                <div class="nav-side left" onclick="event.stopPropagation()">
+                    <button type="button" onclick="navigate('prev')">&lt;</button>
+                    <button type="button" onclick="navigate('prev10')">1m</button>
+                    <button type="button" onclick="navigate('prev100')">15m</button>
+                    <button type="button" onclick="navigate('prev1000')">1h</button>
+                    <button type="button" onclick="navigate('first')">|&lt;</button>
+                </div>
+                <div class="nav-side right" onclick="event.stopPropagation()">
+                    <button type="button" onclick="navigate('next')">&gt;</button>
+                    <button type="button" onclick="navigate('next10')">1m</button>
+                    <button type="button" onclick="navigate('next100')">15m</button>
+                    <button type="button" onclick="navigate('next1000')">1h</button>
+                    <button type="button" onclick="navigate('last')">&gt;|</button>
+                </div>
+                <div class="slot-graph" aria-hidden="true"></div>
+                <div class="playback-area" onclick="event.stopPropagation()">
+                    <div class="playback-row">
+                        <div class="playback-controls">
+                            <button type="button" id="btn-backward" onclick="startPlayback('backward')">◀️</button>
+                            <button type="button" id="btn-stop" onclick="stopPlayback()" disabled>&#9209;</button>
+                            <button type="button" id="btn-forward" onclick="startPlayback('forward')">▶️</button>
+                        </div>
+                        <div class="counter-overlay">
+                            <span class="counter">{{.Index}} / {{.Count}}</span>
+                        </div>
+                        <div class="time-overlay">
+                            <span class="time"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const root = document.getElementById('viewer')
+        const cam = root.dataset.cam;
+        let camFiles = null;
+        let min15ByDay = null;
+
+        const SLOTS_PER_DAY = 96;
+        const SLOT_MINUTES = 15;
+
+        function dayKeyFromTime(t) {
+            const pad = n => String(n).padStart(2, '0');
+            return t.y + '-' + pad(t.m) + '-' + pad(t.dd);
+        }
+
+        function slotIndexFromTime(t) {
+            return t.hh * (60 / SLOT_MINUTES) + Math.floor(t.mm / SLOT_MINUTES);
+        }
+
+        function formatSlotLabel(slotIndex) {
+            const pad = n => String(n).padStart(2, '0');
+            const hour = hourFromSlot(slotIndex);
+            const min = (slotIndex % (60 / SLOT_MINUTES)) * SLOT_MINUTES;
+            return pad(hour) + ':' + pad(min);
+        }
+
+        function hourFromSlot(slotIndex) {
+            return Math.floor(slotIndex / (60 / SLOT_MINUTES));
+        }
+
+        function buildMin15GraphData(files) {
+            const byDay = new Map();
+            for (const file of files) {
+                const t = parseFileTime(file);
+                if (!t) continue;
+                const key = dayKeyFromTime(t);
+                if (!byDay.has(key)) byDay.set(key, new Array(SLOTS_PER_DAY).fill(0));
+                const slot = slotIndexFromTime(t);
+                if (slot >= 0 && slot < SLOTS_PER_DAY) byDay.get(key)[slot]++;
+            }
+            return byDay;
+        }
+
+        function timePositionPercent(t) {
+            const daySeconds = t.hh * 3600 + t.mm * 60 + t.ss;
+            return (daySeconds / (24 * 3600)) * 100;
+        }
+
+        function renderMin15Graph(fileName) {
+            const graphEl = root.querySelector('.slot-graph');
+            if (!graphEl || !min15ByDay) return;
+
+            const t = parseFileTime(fileName);
+            if (!t) {
+                graphEl.innerHTML = '';
+                return;
+            }
+
+            const counts = min15ByDay.get(dayKeyFromTime(t)) || new Array(SLOTS_PER_DAY).fill(0);
+            const max = Math.max(1, ...counts);
+            const currentSlot = slotIndexFromTime(t);
+            const markerLeft = timePositionPercent(t);
+
+            graphEl.innerHTML = counts.map((count, slot) => {
+                const pct = count > 0 ? (count / max) * 100 : 0;
+                const cls = 'bar' +
+                    (hourFromSlot(slot) % 2 === 1 ? ' odd-hour' : '') +
+                    (slot === currentSlot ? ' current' : '') +
+                    (count === 0 ? ' empty' : '');
+                return '<div class="' + cls + '" style="height:' + pct + '%" title="' +
+                    formatSlotLabel(slot) + ' — ' + count + ' photo' + (count === 1 ? '' : 's') + '"></div>';
+            }).join('') +
+                '<div class="slot-graph-time-marker" style="left:' + markerLeft + '%" title="' +
+                fileTimeDisplay(fileName) + '"></div>';
+        }
+
+        async function ensureList() {
+            if (camFiles) return camFiles;
+            const resp = await fetch('?act=list&cam=' + encodeURIComponent(cam));
+            camFiles = await resp.json();
+            min15ByDay = buildMin15GraphData(camFiles);
+            renderMin15Graph(root.dataset.file);
+            return camFiles;
+        }
+
+        const MIN_MS = 60 * 1000;
+        const MIN15_MS = 15 * MIN_MS;
+        const HOUR_MS = 60 * MIN_MS;
+
+        function parseFileTime(fileName) {
+            const nameNoExt = trimSuffix(fileName, ".jpg");
+            const parts = nameNoExt.split('_');
+            if (parts.length < 3) return null;
+            const digits = parts[2].replace(/\D/g, '');
+            if (digits.length < 12) return null;
+            const d = digits.length >= 14 ? digits.slice(0, 14) : ('20' + digits.slice(0, 12));
+            const y = parseInt(d.slice(0, 4), 10);
+            const m = parseInt(d.slice(4, 6), 10);
+            const dd = parseInt(d.slice(6, 8), 10);
+            const hh = parseInt(d.slice(8, 10), 10);
+            const mm = parseInt(d.slice(10, 12), 10);
+            const ss = parseInt(d.slice(12, 14), 10) || 0;
+            if ([y, m, dd, hh, mm, ss].some(n => Number.isNaN(n))) return null;
+            return { y, m, dd, hh, mm, ss };
+        }
+
+        function fileTimeMs(fileName) {
+            const t = parseFileTime(fileName);
+            if (!t) return null;
+            const ms = Date.UTC(t.y, t.m - 1, t.dd, t.hh, t.mm, t.ss);
+            return Number.isNaN(ms) ? null : ms;
+        }
+
+        function fileTimeDisplay(fileName) {
+            const t = parseFileTime(fileName);
+            if (!t) return '';
+            const pad = n => String(n).padStart(2, '0');
+            return pad(t.hh) + ':' + pad(t.mm) + ':' + pad(t.ss);
+        }
+
+        function findIdxAtOffset(files, idx, offsetMs) {
+            const count = files.length;
+            const cur = fileTimeMs(files[idx - 1]);
+            if (cur === null) {
+                const step = Math.abs(offsetMs) >= HOUR_MS ? 100 : 10;
+                return offsetMs < 0 ? Math.max(1, idx - step) : Math.min(count, idx + step);
+            }
+            const target = cur + offsetMs;
+            let lo = 0;
+            let hi = count - 1;
+
+            if (offsetMs > 0) {
+                let result = count - 1;
+                while (lo <= hi) {
+                    const mid = (lo + hi) >> 1;
+                    const t = fileTimeMs(files[mid]);
+                    if (t !== null && t >= target) {
+                        result = mid;
+                        hi = mid - 1;
+                    } else {
+                        lo = mid + 1;
+                    }
+                }
+                return result + 1;
+            }
+
+            let result = 0;
+            while (lo <= hi) {
+                const mid = (lo + hi) >> 1;
+                const t = fileTimeMs(files[mid]);
+                if (t !== null && t <= target) {
+                    result = mid;
+                    lo = mid + 1;
+                } else {
+                    hi = mid - 1;
+                }
+            }
+            return result + 1;
+        }
+
+        async function navigate(dir) {
+            const files = await ensureList();
+            let idx = parseInt(root.dataset.index, 10);
+            const count = parseInt(root.dataset.count, 10);
+            switch (dir) {
+                case 'first': idx = 1; break;
+                case 'prev1000': idx = findIdxAtOffset(files, idx, -HOUR_MS); break;
+                case 'prev100': idx = findIdxAtOffset(files, idx, -MIN15_MS); break;
+                case 'prev10': idx = findIdxAtOffset(files, idx, -MIN_MS); break;
+                case 'prev': idx = Math.max(1, idx - 1); break;
+                case 'next': idx = Math.min(count, idx + 1); break;
+                case 'next10': idx = findIdxAtOffset(files, idx, MIN_MS); break;
+                case 'next100': idx = findIdxAtOffset(files, idx, MIN15_MS); break;
+                case 'next1000': idx = findIdxAtOffset(files, idx, HOUR_MS); break;
+                case 'last': idx = count; break;
+            }
+            root.dataset.index = String(idx);
+            const file = files[idx - 1];
+            root.dataset.file = file
+            updateBtnState()
+
+            const imgEl = root.querySelector('.viewer-stage img');
+            const loadPromise = new Promise((resolve) => {
+                const handler = () => {
+                    imgEl.removeEventListener('load', handler);
+                    imgEl.removeEventListener('error', handler);
+                    resolve();
+                };
+                imgEl.addEventListener('load', handler);
+                imgEl.addEventListener('error', handler);
+            });
+            imgEl.src = '?act=image&cam=' + encodeURIComponent(cam) + '&foto=' + encodeURIComponent(file);
+            const parts = trimSuffix(file,".jpg").split('_');
+            document.title = cam + ' — ' + parts[parts.length-1]
+
+            await loadPromise;
+        }
+
+        function trimSuffix(str, suffix) {
+            if (str.endsWith(suffix)) {
+                return str.slice(0, -suffix.length);
+            }
+            return str;
+        }
+
+        let playbackTimer = null;
+        let isPlaying = false;
+        let pausedDirection = null;
+
+        function pausePlayback() {
+            isPlaying = false;
+            if (playbackTimer) {
+                clearTimeout(playbackTimer);
+                playbackTimer = null;
+            }
+            updateBtnState();
+        }
+
+        function stopPlayback() {
+            pausedDirection = null;
+            pausePlayback();
+        }
+
+        async function resumePlayback() {
+            if (!pausedDirection || isPlaying) return;
+            isPlaying = true;
+            updateBtnState();
+            await ensureList();
+            playNext(pausedDirection);
+        }
+        function updateBtnState() {
+            const idx = parseInt(root.dataset.index, 10);
+            const count = parseInt(root.dataset.count, 10);
+
+            const btns = root.querySelectorAll('.nav-side button');
+            btns[0].disabled = btns[1].disabled = btns[2].disabled = btns[3].disabled = btns[4].disabled = (idx <= 1) || isPlaying;
+            btns[5].disabled = btns[6].disabled = btns[7].disabled = btns[8].disabled = btns[9].disabled = (idx >= count) || isPlaying;
+
+            document.getElementById('btn-stop').disabled = !isPlaying && !pausedDirection;
+            document.getElementById('btn-backward').disabled = idx <= 1 || isPlaying;
+            document.getElementById('btn-forward').disabled = idx >= count || isPlaying;
+
+            const graphEl = root.querySelector('.slot-graph');
+            if (graphEl) graphEl.classList.toggle('playing', isPlaying);
+
+            root.querySelector('.counter').textContent = idx + ' / ' + count;
+            root.querySelector('.time').textContent = fileTimeDisplay(root.dataset.file);
+            renderMin15Graph(root.dataset.file);
+        }
+        updateBtnState();
+        ensureList();
+
+        function toggleFullScreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.log(`Error attempting to enable fullscreen: ${err.message} (${err.name})`);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            const t = e.target;
+            if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+
+            let dir = null;
+            switch (e.key) {
+                case ' ':
+                    if (isPlaying) {
+                        e.preventDefault();
+                        pausePlayback();
+                    } else if (pausedDirection) {
+                        e.preventDefault();
+                        resumePlayback();
+                    }
+                    return;
+                case 'ArrowLeft': dir = 'prev'; break;
+                case 'ArrowRight': dir = 'next'; break;
+                case 'Home': dir = 'first'; break;
+                case 'End': dir = 'last'; break;
+                case 'PageUp': dir = 'prev100'; break;
+                case 'PageDown': dir = 'next100'; break;
+                case 'f':
+                case 'F':
+                    toggleFullScreen();
+                    return;
+                default: return;
+            }
+            if (isPlaying) return;
+            e.preventDefault();
+            navigate(dir);
+        });
+
+        async function playNext(direction) {
+            if (!isPlaying) return;
+            
+            let idx = parseInt(root.dataset.index, 10);
+            const count = parseInt(root.dataset.count, 10);
+            
+            if ((direction === 'forward' && idx >= count) || (direction === 'backward' && idx <= 1)) {
+                stopPlayback();
+                return;
+            }
+            
+            await navigate(direction === 'forward' ? 'next' : 'prev');
+
+            playbackTimer = setTimeout(() => playNext(direction), 25);
+        }
+
+        async function startPlayback(direction) {
+            pausePlayback();
+            pausedDirection = direction;
+            isPlaying = true;
+            updateBtnState();
+
+            await ensureList();
+            playNext(direction);
+        }
+    </script>
+</body>
+</html>

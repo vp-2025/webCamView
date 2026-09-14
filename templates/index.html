@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Cam View</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: Arial, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+        .grid {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+            padding: 10px 20px 30px;
+        }
+        .card {
+            background: #16213e;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .card:hover { transform: scale(1.02); }
+        .card img {
+            display: block;
+            width: 100%;
+            max-width: 640px;
+            height: auto;
+        }
+        .card .label {
+            padding: 10px 14px;
+            font-size: 0.9em;
+            color: #aaa;
+        }
+        .card .label strong { color: #e0e0e0; }
+        .nav-bar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 6px 14px 10px;
+            background: #0f1a30;
+        }
+        .nav-bar button {
+            white-space:nowrap;
+            width: 14%;
+            background: #1a2744;
+            color: #ccc;
+            border: 1px solid #2a3a5c;
+            border-radius: 4px;
+            padding: 4px 12px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: background 0.15s;
+        }
+        .nav-bar button:hover:not(:disabled) { background: #2a4070; color: #fff; }
+        .nav-bar button:disabled { opacity: 0.35; cursor: default; }
+        .nav-bar .counter {
+            color: #8899bb;
+            font-size: 0.85em;
+            min-width: 70px;
+            text-align: center;
+        }
+        span.counter {float: right}
+    </style>
+</head>
+<body>
+    <div class="grid">
+        {{range .}}
+        <div class="card" id="card-{{.Camera}}" data-cam="{{.Camera}}" data-count="{{.Count}}" data-index="{{.Index}}">
+            <img src="{{.Path}}" alt="{{.Camera}}" onclick="openViewer(event, this)">
+            <div class="label"><strong>{{.Camera}}</strong> <span class="time">{{.Time}}</span> <span class="counter">{{.Index}} / {{.Count}}</span> </div>
+            <div class="nav-bar">
+                <button onclick="navigate('{{.Camera}}','first')">|&lt;</button>
+                <button onclick="navigate('{{.Camera}}','prev100')">&lt;&lt;&lt;</button>
+                <button onclick="navigate('{{.Camera}}','prev10')">&lt;&lt;</button>
+                <button onclick="navigate('{{.Camera}}','prev')">&lt;</button>
+                <button onclick="navigate('{{.Camera}}','next')">&gt;</button>
+                <button onclick="navigate('{{.Camera}}','next10')">&gt;&gt;</button>
+                <button onclick="navigate('{{.Camera}}','next100')">&gt;&gt;&gt;</button>
+                <button onclick="navigate('{{.Camera}}','last')">&gt;|</button>
+            </div>
+        </div>
+        {{end}}
+    </div>
+
+    <script>
+        const camFiles = {};
+
+        function openViewer(ev, img) {
+            ev.stopPropagation();
+            const card = img.closest('.card');
+            const cam = card.dataset.cam;
+            const idx = card.dataset.index;
+            window.open('?act=view&cam=' + encodeURIComponent(cam)) //  + '&idx=' + encodeURIComponent(idx)
+        }
+
+        async function ensureList(cam) {
+            if (camFiles[cam]) return camFiles[cam];
+            const resp = await fetch('?act=list&cam=' + cam);
+            camFiles[cam] = await resp.json();
+            return camFiles[cam];
+        }
+
+        async function navigate(cam, dir) {
+            const files = await ensureList(cam);
+            const card = document.getElementById('card-' + cam);
+
+            let idx = parseInt(card.dataset.index);
+            const count = parseInt(card.dataset.count);
+            switch (dir) {
+                case 'first': idx = 1; break;
+                case 'prev100':  idx = Math.max(1, idx - 100); break;
+                case 'prev10':  idx = Math.max(1, idx - 10); break;
+                case 'prev':  idx = Math.max(1, idx - 1); break;
+                case 'next':  idx = Math.min(count, idx + 1); break;
+                case 'next10':  idx = Math.min(count, idx + 10); break;
+                case 'next100':  idx = Math.min(count, idx + 100); break;
+                case 'last':  idx = count; break;
+            }
+            card.dataset.index = idx.toString()
+            updNaviBtn(card, idx, count)
+
+            const file = files[idx-1]; // zero-based
+            card.querySelector('img').src = '?act=image&cam=' + cam + '&foto=' + encodeURIComponent(file);
+
+            card.querySelector('.counter').textContent = idx + ' / ' + count;
+
+            const nameNoExt = file.replace(/\.jpg$/i, '').toUpperCase();
+            const parts = nameNoExt.split('_');
+            card.querySelector('.time').textContent = parts.length > 1 ? ' ' + parts[parts.length - 1] : '';
+        }
+
+        function updNaviBtn(card, idx, count) {
+            const btns = card.querySelectorAll('.nav-bar button');
+            btns[0].disabled = btns[1].disabled = btns[2].disabled = btns[3].disabled = (idx <= 1);
+            btns[4].disabled = btns[5].disabled = btns[6].disabled = btns[7].disabled = (idx >= count);
+        }
+
+        document.querySelectorAll('.card').forEach(function(card) {
+            const idx = parseInt(card.dataset.index);
+            const count = parseInt(card.dataset.count);
+            updNaviBtn(card, idx, count)
+        });
+    </script>
+</body>
+</html>
