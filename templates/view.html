@@ -238,8 +238,8 @@
         let camFiles = null;
         let min15ByDay = null;
 
-        const SLOTS_PER_DAY = 96;
-        const SLOT_MINUTES = 15;
+        const SLOTS_PER_DAY = 24 * 60;
+        const SLOT_MINUTES = 1;
 
         function dayKeyFromTime(t) {
             const pad = n => String(n).padStart(2, '0');
