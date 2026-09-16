@@ -2,4 +2,4 @@
 
 package main
 
-const basePath = "/home"
+const basePath = "/home/ftp"
