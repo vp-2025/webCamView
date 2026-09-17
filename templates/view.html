@@ -136,6 +136,17 @@
         }
         .playback-controls button:hover { background: #2a4070; color: #fff; }
         .playback-controls button:disabled { opacity: 0.35; color: #888; cursor: default; }
+        .date-select {
+            background: rgba(15, 26, 48, 0.85);
+            color: #ccc;
+            border: 1px solid #2a3a5c;
+            border-radius: 4px;
+            padding: 6px 10px;
+            font-size: 0.85em;
+            cursor: pointer;
+            max-width: 140px;
+        }
+        .date-select:hover { border-color: #4a6a9c; color: #fff; }
         .slot-graph {
             position: absolute;
             bottom: 0;
@@ -194,7 +205,7 @@
     </style>
 </head>
 <body>
-    <div id="viewer" data-cam="{{.Camera}}" data-count="{{.Count}}" data-index="{{.Index}}" data-file="{{.FileName}}">
+    <div id="viewer" data-cam="{{.Camera}}" data-date="{{.Date}}" data-count="{{.Count}}" data-index="{{.Index}}" data-file="{{.FileName}}">
         <div class="viewer-main">
             <div class="viewer-stage" onclick="toggleFullScreen()">
                 <img src="{{.Path}}" alt="{{.Camera}}">
@@ -215,6 +226,13 @@
                 <div class="slot-graph" aria-hidden="true"></div>
                 <div class="playback-area" onclick="event.stopPropagation()">
                     <div class="playback-row">
+                        {{if gt (len .Dates) 1}}
+                        <select class="date-select" id="date-select" title="Archive day" onchange="switchDate(this.value)">
+                            {{range .Dates}}
+                            <option value="{{.}}"{{if eq $.Date .}} selected{{end}}>{{if eq . ""}}Today{{else}}{{.}}{{end}}</option>
+                            {{end}}
+                        </select>
+                        {{end}}
                         <div class="playback-controls">
                             <button type="button" id="btn-backward" onclick="startPlayback('backward')">◀️</button>
                             <button type="button" id="btn-stop" onclick="stopPlayback()" disabled>&#9209;</button>
@@ -235,8 +253,24 @@
     <script>
         const root = document.getElementById('viewer')
         const cam = root.dataset.cam;
+        const camDate = root.dataset.date || '';
         let camFiles = null;
         let min15ByDay = null;
+
+        function apiQuery(act, extra) {
+            const q = new URLSearchParams({ act, cam });
+            if (camDate) q.set('date', camDate);
+            if (extra) {
+                for (const [k, v] of Object.entries(extra)) q.set(k, v);
+            }
+            return '?' + q.toString();
+        }
+
+        function switchDate(newDate) {
+            const q = new URLSearchParams({ act: 'view', cam });
+            if (newDate) q.set('date', newDate);
+            window.location = '?' + q.toString();
+        }
 
         const SLOTS_PER_DAY = 24 * 60;
         const SLOT_MINUTES = 1;
@@ -309,7 +343,7 @@
 
         async function ensureList() {
             if (camFiles) return camFiles;
-            const resp = await fetch('?act=list&cam=' + encodeURIComponent(cam));
+            const resp = await fetch(apiQuery('list'));
             camFiles = await resp.json();
             min15ByDay = buildMin15GraphData(camFiles);
             renderMin15Graph(root.dataset.file);
@@ -422,7 +456,7 @@
                 imgEl.addEventListener('load', handler);
                 imgEl.addEventListener('error', handler);
             });
-            imgEl.src = '?act=image&cam=' + encodeURIComponent(cam) + '&foto=' + encodeURIComponent(file);
+            imgEl.src = apiQuery('image', { foto: file });
             const parts = trimSuffix(file,".jpg").split('_');
             document.title = cam + ' — ' + parts[parts.length-1]
 

@@ -3,17 +3,18 @@ package main
 import (
 	"embed"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"text/template"
+	"time"
 )
 
 //go:embed templates/*
@@ -30,8 +31,65 @@ type CameraImage struct {
 	Index    int    `json:"index"`
 }
 
-func getImageFiles(cam string) (files []string) {
-	dir := filepath.Join(basePath, cam)
+type ViewPageData struct {
+	CameraImage
+	Date  string
+	Dates []string
+}
+
+var dateFolderSuffix = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
+func parseDateParam(date string) (string, bool) {
+	if date != "" {
+		if _, err := time.Parse("2006-01-02", date); err != nil {
+			return "", false
+		}
+	}
+	return date, true
+}
+
+func cameraDir(cam, date string) string {
+	if date != "" {
+		return filepath.Join(basePath, cam+"_"+date)
+	}
+	return filepath.Join(basePath, cam)
+}
+
+func getCameraDates(cam string) (dates []string) {
+	if _, err := os.Stat(cameraDir(cam, "")); err == nil {
+		dates = append(dates, "")
+	}
+
+	prefix := cam + "_"
+	var archived []string
+	entries, err := os.ReadDir(basePath)
+	if err != nil {
+		return dates
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		datePart := strings.TrimPrefix(name, prefix)
+		if !dateFolderSuffix.MatchString(datePart) {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(basePath, name)); err != nil {
+			continue
+		}
+		archived = append(archived, datePart)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(archived)))
+	dates = append(dates, archived...)
+	return dates
+}
+
+func getImageFiles(cam, date string) (files []string) {
+	dir := cameraDir(cam, date)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		log.Printf("Error reading directory %s: %v", dir, err)
@@ -59,9 +117,20 @@ func formatTime(fileName string) string {
 	return fTime
 }
 
+func imageQuery(cam, date, fileName string) string {
+	q := url.Values{}
+	q.Set("act", "image")
+	q.Set("cam", cam)
+	q.Set("foto", fileName)
+	if date != "" {
+		q.Set("date", date)
+	}
+	return "?" + q.Encode()
+}
+
 func getLatestImages() (images []CameraImage) {
 	for _, cam := range cameras {
-		files := getImageFiles(cam)
+		files := getImageFiles(cam, "")
 		if len(files) == 0 {
 			continue
 		}
@@ -70,7 +139,7 @@ func getLatestImages() (images []CameraImage) {
 			Camera:   cam,
 			FileName: latest,
 			Time:     formatTime(latest),
-			Path:     fmt.Sprintf("?act=image&cam=%s&foto=%s", cam, latest),
+			Path:     imageQuery(cam, "", latest),
 			Count:    len(files),
 			Index:    len(files),
 		})
@@ -84,22 +153,32 @@ func handleWeb(w http.ResponseWriter, r *http.Request) {
 	values := r.URL.Query()
 	switch values.Get("act") {
 	case "image":
-		handleImage(w, r, values.Get("cam"), values.Get("foto"))
+		handleImage(w, r, values.Get("cam"), values.Get("date"), values.Get("foto"))
 	case "list":
-		handleList(w, r, values.Get("cam"))
+		handleList(w, r, values.Get("cam"), values.Get("date"))
 	case "view":
-		handleView(w, r, values.Get("cam"), values.Get("idx"))
+		handleView(w, r, values.Get("cam"), values.Get("date"), values.Get("idx"))
 	default:
 		handleIndex(w)
 	}
 }
 
-func handleView(w http.ResponseWriter, r *http.Request, camera, idxStr string) {
+func handleView(w http.ResponseWriter, r *http.Request, camera, dateParam, idxStr string) {
 	if slices.Index(cameras, camera) == -1 {
 		http.NotFound(w, r)
 		return
 	}
-	files := getImageFiles(camera)
+	date, ok := parseDateParam(dateParam)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	dates := getCameraDates(camera)
+	if date != "" && !slices.Contains(dates, date) {
+		http.NotFound(w, r)
+		return
+	}
+	files := getImageFiles(camera, date)
 	if len(files) == 0 {
 		http.NotFound(w, r)
 		return
@@ -117,13 +196,17 @@ func handleView(w http.ResponseWriter, r *http.Request, camera, idxStr string) {
 		idx = len(files)
 	}
 	fileName := files[idx-1]
-	img := CameraImage{
-		Camera:   camera,
-		FileName: fileName,
-		Time:     formatTime(fileName),
-		Path:     "?act=image&cam=" + url.QueryEscape(camera) + "&foto=" + url.QueryEscape(fileName),
-		Count:    len(files),
-		Index:    idx,
+	page := ViewPageData{
+		CameraImage: CameraImage{
+			Camera:   camera,
+			FileName: fileName,
+			Time:     formatTime(fileName),
+			Path:     imageQuery(camera, date, fileName),
+			Count:    len(files),
+			Index:    idx,
+		},
+		Date:  date,
+		Dates: dates,
 	}
 	tmpl, err := template.ParseFS(templateFS, "templates/view.html")
 	if err != nil {
@@ -132,28 +215,50 @@ func handleView(w http.ResponseWriter, r *http.Request, camera, idxStr string) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.ExecuteTemplate(w, "view.html", img); err != nil {
+	if err := tmpl.ExecuteTemplate(w, "view.html", page); err != nil {
 		log.Printf("View template error: %v", err)
 	}
 }
 
-func handleList(w http.ResponseWriter, r *http.Request, camera string) {
+func handleList(w http.ResponseWriter, r *http.Request, camera, dateParam string) {
 	if slices.Index(cameras, camera) == -1 {
 		http.NotFound(w, r)
 		return
 	}
-	files := getImageFiles(camera)
+	date, ok := parseDateParam(dateParam)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if date != "" && !slices.Contains(getCameraDates(camera), date) {
+		http.NotFound(w, r)
+		return
+	}
+	files := getImageFiles(camera, date)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(files)
 }
 
-func handleImage(w http.ResponseWriter, r *http.Request, camera, fileName string) {
+func handleImage(w http.ResponseWriter, r *http.Request, camera, dateParam, fileName string) {
 	if slices.Index(cameras, camera) == -1 {
 		http.NotFound(w, r)
 		return
 	}
+	date, ok := parseDateParam(dateParam)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if date != "" && !slices.Contains(getCameraDates(camera), date) {
+		http.NotFound(w, r)
+		return
+	}
 
-	filePath := filepath.Clean(filepath.Join(basePath, camera, fileName))
+	if fileName == "" || strings.Contains(fileName, "..") || strings.ContainsAny(fileName, `/\`) {
+		http.NotFound(w, r)
+		return
+	}
+	filePath := filepath.Join(cameraDir(camera, date), fileName)
 	http.ServeFile(w, r, filePath)
 }
 
