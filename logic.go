@@ -31,10 +31,15 @@ type CameraImage struct {
 	Index    int    `json:"index"`
 }
 
+type DateEntry struct {
+	Date  string
+	Count int
+}
+
 type ViewPageData struct {
 	CameraImage
 	Date  string
-	Dates []string
+	Dates []DateEntry
 }
 
 var dateFolderSuffix = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
@@ -86,6 +91,27 @@ func getCameraDates(cam string) (dates []string) {
 	sort.Sort(sort.Reverse(sort.StringSlice(archived)))
 	dates = append(dates, archived...)
 	return dates
+}
+
+func countImageFiles(cam, date string) (count int) {
+	entries, err := os.ReadDir(cameraDir(cam, date))
+	if err != nil {
+		return 0
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(strings.ToLower(entry.Name()), ".jpg") {
+			count++
+		}
+	}
+	return
+}
+
+func getDateDateEntries(cam string, dates []string) []DateEntry {
+	opts := make([]DateEntry, 0, len(dates))
+	for _, d := range dates {
+		opts = append(opts, DateEntry{Date: d, Count: countImageFiles(cam, d)})
+	}
+	return opts
 }
 
 func getImageFiles(cam, date string) (files []string) {
@@ -206,7 +232,7 @@ func handleView(w http.ResponseWriter, r *http.Request, camera, dateParam, idxSt
 			Index:    idx,
 		},
 		Date:  date,
-		Dates: dates,
+		Dates: getDateDateEntries(camera, dates),
 	}
 	tmpl, err := template.ParseFS(templateFS, "templates/view.html")
 	if err != nil {
@@ -236,7 +262,7 @@ func handleList(w http.ResponseWriter, r *http.Request, camera, dateParam string
 	}
 	files := getImageFiles(camera, date)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(files)
+	_ = json.NewEncoder(w).Encode(files)
 }
 
 func handleImage(w http.ResponseWriter, r *http.Request, camera, dateParam, fileName string) {

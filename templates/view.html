@@ -144,7 +144,7 @@
             padding: 6px 10px;
             font-size: 0.85em;
             cursor: pointer;
-            max-width: 140px;
+            max-width: 200px;
         }
         .date-select:hover { border-color: #4a6a9c; color: #fff; }
         .slot-graph {
@@ -229,7 +229,7 @@
                         {{if gt (len .Dates) 1}}
                         <select class="date-select" id="date-select" title="Archive day" onchange="switchDate(this.value)">
                             {{range .Dates}}
-                            <option value="{{.}}"{{if eq $.Date .}} selected{{end}}>{{if eq . ""}}Today{{else}}{{.}}{{end}}</option>
+                            <option value="{{.Date}}"{{if eq $.Date .Date}} selected{{end}}>{{if eq .Date ""}}Today{{else}}{{.Date}}{{end}} ({{.Count}})</option>
                             {{end}}
                         </select>
                         {{end}}
