@@ -159,7 +159,7 @@
             /*padding: 4px 4px 6px;*/
             background: rgba(15, 26, 48, 0.7);
             border-top: 1px solid rgba(255, 255, 255, 0.08);
-            pointer-events: none;
+            cursor: pointer;
             z-index: 4;
             transition: background 0.15s ease;
         }
@@ -425,11 +425,45 @@
             return result + 1;
         }
 
-        async function navigate(dir) {
+        function findIdxNearestTime(files, targetMs) {
+            let best = -1;
+            let bestDiff = Infinity;
+            for (let i = 0; i < files.length; i++) {
+                const t = fileTimeMs(files[i]);
+                if (t === null) continue;
+                const diff = Math.abs(t - targetMs);
+                if (diff < bestDiff) {
+                    bestDiff = diff;
+                    best = i;
+                }
+            }
+            return best < 0 ? null : best + 1;
+        }
+
+        async function onGraphClick(e) {
+            e.stopPropagation();
+            if (isPlaying) return;
+            const graphEl = e.currentTarget;
+            const rect = graphEl.getBoundingClientRect();
+            if (rect.width <= 0) return;
+            const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+
+            const files = await ensureList();
+            const cur = parseFileTime(root.dataset.file);
+            if (!cur) return;
+            const dayStart = Date.UTC(cur.y, cur.m - 1, cur.dd, 0, 0, 0);
+            const idx = findIdxNearestTime(files, dayStart + frac * 24 * 3600 * 1000);
+            if (idx !== null) navigate('goto', idx);
+        }
+
+        root.querySelector('.slot-graph').addEventListener('click', onGraphClick);
+
+        async function navigate(dir, target) {
             const files = await ensureList();
             let idx = parseInt(root.dataset.index, 10);
             const count = parseInt(root.dataset.count, 10);
             switch (dir) {
+                case 'goto': idx = Math.min(count, Math.max(1, target)); break;
                 case 'first': idx = 1; break;
                 case 'prev1000': idx = findIdxAtOffset(files, idx, -HOUR_MS); break;
                 case 'prev100': idx = findIdxAtOffset(files, idx, -MIN15_MS); break;
